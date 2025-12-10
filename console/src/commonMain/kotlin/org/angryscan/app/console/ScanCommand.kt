@@ -14,8 +14,7 @@ import java.io.File
  * Command to perform scanning
  */
 class ScanCommand : CliktCommand(
-    name = "scan",
-    help = "Perform scanning of files"
+    name = "scan"
 ) {
     private val path: String by argument(
         name = "PATH",

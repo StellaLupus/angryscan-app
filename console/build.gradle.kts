@@ -6,10 +6,6 @@ plugins {
 
 kotlin {
     jvm("desktop")
-    jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
-        vendor.set(JvmVendorSpec.ADOPTIUM)
-    }
     
     sourceSets {
         val commonMain by getting {

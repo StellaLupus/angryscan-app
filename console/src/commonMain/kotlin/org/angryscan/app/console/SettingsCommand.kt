@@ -16,13 +16,12 @@ import org.koin.core.component.inject
  * Command to manage settings
  */
 class SettingsCommand : CliktCommand(
-    name = "settings",
-    help = "Manage application settings"
+    name = "settings"
 ), KoinComponent {
     
     override fun run() {
         // Show help if no subcommand provided
-        echo(helpMessage())
+        echo(context.formattedHelp())
     }
     
     init {
@@ -38,8 +37,7 @@ class SettingsCommand : CliktCommand(
  * Command to list current settings
  */
 class SettingsListCommand : CliktCommand(
-    name = "list",
-    help = "List current settings"
+    name = "list"
 ), KoinComponent {
     
     private val appSettings: AppSettings by inject()
@@ -70,8 +68,7 @@ class SettingsListCommand : CliktCommand(
  * Command to set settings
  */
 class SettingsSetCommand : CliktCommand(
-    name = "set",
-    help = "Set settings values"
+    name = "set"
 ), KoinComponent {
     
     private val matchers: List<String>? by option(
@@ -178,8 +175,7 @@ class SettingsSetCommand : CliktCommand(
  * Command to save settings
  */
 class SettingsSaveCommand : CliktCommand(
-    name = "save",
-    help = "Save current settings to disk"
+    name = "save"
 ), KoinComponent {
     
     private val scanSettings: ScanSettings by inject()
