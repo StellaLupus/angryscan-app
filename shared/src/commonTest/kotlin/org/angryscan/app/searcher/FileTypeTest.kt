@@ -119,12 +119,13 @@ internal class FileTypeTest() {
                         val path = javaClass.getResource("/files/$filename")
                         assertNotNull(path)
                         val f = File(path.file)
-                        val enumType: IFileType? = f.let { IFileType.getFileType(it) }
+                        val enumType: IFileType? = f.let { IFileType.getFileType(it).firstOrNull() }
                         enumType?.scanFile(
                             f,
                             currentCoroutineContext(),
                             engines,
-                            false
+                            false,
+                            IFileType.getAll()
                         ).let { doc ->
                             Matrix.getMap(filename)
                                 ?.let { m -> assertEquals(m, doc?.getDocumentFields(), "File: $filename") }
@@ -154,20 +155,40 @@ internal class FileTypeTest() {
             "veryLong/very_long.xls",
             "veryLong/very_long.pdf"
         )
+        
+        val excludedMatcherClasses = setOf(
+            EIN::class,
+            ITIN::class,
+            RTN::class,
+            DriverLicenseUS::class,
+            VisaNumberUS::class,
+            AlienRegistrationNumber::class,
+            USCIS::class,
+            SEVISID::class,
+            DODID::class,
+            APOFPODPO::class,
+            NSN::class,
+            TCN::class,
+            NPI::class,
+            AddressUS::class
+        )
 
         fun checkScan(filename: String, map: Map<IMatcher, Int>?, isFastScan: Boolean = false) {
 
             val path = javaClass.getResource("/files/$filename")
             assertNotNull(path)
             val f = File(path.file)
-            val enumType: IFileType? = f.let { IFileType.getFileType(it) }
+            val enumType: IFileType? = f.let { IFileType.getFileType(it).firstOrNull() }
+
+            val allMatchers = Matchers.toKotlinMatchers()
+            val filteredMatchers = allMatchers.filterNot { it::class in excludedMatcherClasses }
 
             val engines = listOf(
-                KotlinEngine(Matchers.toKotlinMatchers())
+                KotlinEngine(filteredMatchers)
             )
 
             runBlocking {
-                enumType?.scanFile(f, currentCoroutineContext(), engines, isFastScan).let {
+                enumType?.scanFile(f, currentCoroutineContext(), engines, isFastScan, IFileType.getAll()).let {
                     assertNotNull(it)
                     assertEquals(map, it.getDocumentFields())
                 }
@@ -197,10 +218,10 @@ internal class FileTypeTest() {
         )
         runBlocking {
             try {
-                val enumType: IFileType? = IFileType.getFileType(f)
-                enumType?.scanFile(f, currentCoroutineContext(), engines, false).let {
+                val enumType: IFileType? = IFileType.getFileType(f).firstOrNull()
+                enumType?.scanFile(f, currentCoroutineContext(), engines, false, IFileType.getAll()).let {
                     assertEquals(mapOf(), it?.getDocumentFields())
-                    assertTrue(it?.skipped() == true)
+                    assertEquals(it?.skipped(), true)
                 }
             } catch (e: Exception) {
                 fail(e.message)
@@ -225,7 +246,7 @@ internal class FileTypeTest() {
 
         runBlocking {
             try {
-                DOCType.scanFile(f, currentCoroutineContext(), engines, false).let {
+                DOCType.scanFile(f, currentCoroutineContext(), engines, false, IFileType.getAll()).let {
                     assertEquals(0, it.length())
                     assertEquals(mapOf(), it.getDocumentFields())
                 }

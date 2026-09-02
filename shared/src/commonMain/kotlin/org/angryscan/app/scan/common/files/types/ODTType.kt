@@ -1,5 +1,6 @@
 package org.angryscan.app.scan.common.files.types
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -14,6 +15,8 @@ import org.odftoolkit.odfdom.incubator.doc.text.OdfTextParagraph
 import java.io.File
 import kotlin.coroutines.CoroutineContext
 
+private val logger = KotlinLogging.logger { }
+
 @Serializable
 @Suppress("unused")
 object ODTType : FileType() {
@@ -23,7 +26,8 @@ object ODTType : FileType() {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val str = StringBuilder()
         val res = Document(file.length(), file.absolutePath)
@@ -92,7 +96,8 @@ object ODTType : FileType() {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Error while scanning odt ${file.absolutePath}: ${e.message}" }
             res.skip()
             return res
         }

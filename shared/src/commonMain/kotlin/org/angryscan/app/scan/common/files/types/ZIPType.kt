@@ -1,5 +1,6 @@
 package org.angryscan.app.scan.common.files.types
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -14,6 +15,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.CoroutineContext
 
+private val logger = KotlinLogging.logger { }
+
 @Serializable
 object ZIPType : FileType() {
     override val name = "ZIP"
@@ -22,7 +25,8 @@ object ZIPType : FileType() {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val res = Document(file.length(), file.absolutePath)
         var skipped = 0
@@ -52,7 +56,7 @@ object ZIPType : FileType() {
                                 if (zipEntry == null) continue
 
                                 // не распаковывать если расширение не из выбранных
-                                if (!selectedExtension(zipEntry.name))
+                                if (!selectedExtension(zipEntry.name, selectedExtensions))
                                     continue
 
                                 val tmpFile = File.createTempFile(
@@ -70,14 +74,16 @@ object ZIPType : FileType() {
                                             bufferedOutputStream.flush()
                                         }
                                     }
-                                    IFileType.getFileType(tmpFile)?.scanFile(tmpFile, context, engines, fastScan)
-                                        ?.also { doc ->
+                                    IFileType.getFileType(tmpFile).forEach { ft->
+                                        ft.scanFile(tmpFile, context, engines, fastScan, selectedExtensions)
+                                        .also { doc ->
                                             if (!doc.skipped()) {
                                                 res + doc.getDocumentFields()
                                             } else {
                                                 skipped++
                                             }
                                         }
+                                    }
                                     all++
                                 } catch (_: IOException) {
                                     continue
@@ -90,7 +96,8 @@ object ZIPType : FileType() {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Error while scanning zip ${file.absolutePath}: ${e.message}" }
             if (res.isEmpty()) {
                 res.skip()
                 return res

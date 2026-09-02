@@ -16,7 +16,8 @@ sealed interface IFileType {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document
 
     fun scan(text: String, engine: IScanEngine): Map<IMatcher, Int> {
@@ -26,6 +27,10 @@ sealed interface IFileType {
             .map { it.key to it.value.size }
             .toMap()
     }
+
+    fun extensions() = extensions
+
+    fun allowExtension(ext: String): Boolean = ext in extensions
 
     companion object {
         fun getAll(): List<IFileType> {
@@ -54,17 +59,18 @@ sealed interface IFileType {
         /**
          * Found IFileType by file extension
          */
-        fun getFileType(file: File): IFileType? {
+        fun getFileType(file: File): List<IFileType> {
             val extension = file.extension.lowercase()
-            return getAll().find { fileType ->
-                fileType.extensions.any { it.lowercase() == extension }
+            return getAll().filter { fileType ->
+                fileType.allowExtension(extension)
             }
         }
 
         /**
          * Found IFileType by file extension
          */
-        fun getFileType(filePath: String): IFileType? =
+        fun getFileType(filePath: String): List<IFileType> =
             getFileType(File(filePath))
+
     }
 }

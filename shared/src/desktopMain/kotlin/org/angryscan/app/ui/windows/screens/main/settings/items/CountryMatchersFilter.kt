@@ -6,6 +6,7 @@ import org.angryscan.app.scan.functions.CertDetectFun
 import org.angryscan.app.scan.functions.CodeDetectFun
 import org.angryscan.common.engine.IMatcher
 import org.angryscan.common.matchers.*
+import org.angryscan.gitleaks.matcher.GitleaksMatcher
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.reflect.KClass
@@ -73,6 +74,20 @@ object MatcherCountryMapping {
         PassportUS::class to MatcherCountry.USA,
         MedicareUS::class to MatcherCountry.USA,
         FullNameUS::class to MatcherCountry.USA,
+        EIN::class to MatcherCountry.USA,
+        ITIN::class to MatcherCountry.USA,
+        RTN::class to MatcherCountry.USA,
+        DriverLicenseUS::class to MatcherCountry.USA,
+        VisaNumberUS::class to MatcherCountry.USA,
+        AlienRegistrationNumber::class to MatcherCountry.USA,
+        USCIS::class to MatcherCountry.USA,
+        SEVISID::class to MatcherCountry.USA,
+        DODID::class to MatcherCountry.USA,
+        APOFPODPO::class to MatcherCountry.USA,
+        NSN::class to MatcherCountry.USA,
+        TCN::class to MatcherCountry.USA,
+        NPI::class to MatcherCountry.USA,
+        AddressUS::class to MatcherCountry.USA,
 
         // China
         RIN::class to MatcherCountry.CHINA,
@@ -93,6 +108,9 @@ object MatcherCountryMapping {
         CertDetectFun::class to MatcherCountry.INTERNATIONAL,
         HashData::class to MatcherCountry.INTERNATIONAL,
         LegalEntityId::class to MatcherCountry.INTERNATIONAL,
+        GitleaksMatcher::class to MatcherCountry.INTERNATIONAL,
+        CryptoWallet::class to MatcherCountry.INTERNATIONAL,
+        CryptoSeedPhrase::class to MatcherCountry.INTERNATIONAL,
     )
 
     fun getCountry(matcher: IMatcher): MatcherCountry {

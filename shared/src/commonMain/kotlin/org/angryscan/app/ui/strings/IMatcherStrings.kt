@@ -1,15 +1,19 @@
 package org.angryscan.app.ui.strings
 
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.angryscan.app.resources.*
 import org.angryscan.app.scan.functions.CertDetectFun
 import org.angryscan.app.scan.functions.CodeDetectFun
 import org.angryscan.app.scan.functions.RKNDomainDetectFun
 import org.angryscan.common.engine.IMatcher
 import org.angryscan.common.matchers.*
+import org.angryscan.gitleaks.matcher.GitleaksMatcher
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
+import java.util.*
 import kotlin.reflect.KClass
 
 private val matcherResources: Map<KClass<out IMatcher>, Pair<StringResource, StringResource>> = buildMap {
@@ -21,6 +25,8 @@ private val matcherResources: Map<KClass<out IMatcher>, Pair<StringResource, Str
     put(CadastralNumber::class, Res.string.Matcher_CadastralNumber to Res.string.Matcher_Description_CadastralNumber)
     put(CardNumber::class, Res.string.Matcher_CardNumbers to Res.string.Matcher_Description_CardNumbers)
     put(CVV::class, Res.string.Matcher_CVV to Res.string.Matcher_Description_CVV)
+    put(CryptoWallet::class, Res.string.Matcher_CryptoWallet to Res.string.Matcher_Description_CryptoWallet)
+    put(CryptoSeedPhrase::class, Res.string.Matcher_CryptoSeedPhrase to Res.string.Matcher_Description_CryptoSeedPhrase)
     put(DeathDate::class, Res.string.Matcher_DeathDate to Res.string.Matcher_Description_DeathDate)
     put(DriverLicense::class, Res.string.Matcher_DriverLicense to Res.string.Matcher_Description_DriverLicense)
     put(EducationDoc::class, Res.string.Matcher_EducationDoc to Res.string.Matcher_Description_EducationDoc)
@@ -63,11 +69,26 @@ private val matcherResources: Map<KClass<out IMatcher>, Pair<StringResource, Str
     put(StateRegContract::class, Res.string.Matcher_StateRegContract to Res.string.Matcher_Description_StateRegContract)
     put(VIN::class, Res.string.Matcher_VIN to Res.string.Matcher_Description_VIN)
     put(VehicleRegNumber::class, Res.string.Matcher_VehicleRegNumber to Res.string.Matcher_Description_VehicleRegNumber)
+    put(EIN::class, Res.string.Matcher_EIN to Res.string.Matcher_Description_EIN)
+    put(ITIN::class, Res.string.Matcher_ITIN to Res.string.Matcher_Description_ITIN)
+    put(RTN::class, Res.string.Matcher_RTN to Res.string.Matcher_Description_RTN)
+    put(DriverLicenseUS::class, Res.string.Matcher_DriverLicenseUS to Res.string.Matcher_Description_DriverLicenseUS)
+    put(VisaNumberUS::class, Res.string.Matcher_VisaNumberUS to Res.string.Matcher_Description_VisaNumberUS)
+    put(AlienRegistrationNumber::class, Res.string.Matcher_AlienRegistrationNumber to Res.string.Matcher_Description_AlienRegistrationNumber)
+    put(USCIS::class, Res.string.Matcher_USCIS to Res.string.Matcher_Description_USCIS)
+    put(SEVISID::class, Res.string.Matcher_SEVISID to Res.string.Matcher_Description_SEVISID)
+    put(DODID::class, Res.string.Matcher_DODID to Res.string.Matcher_Description_DODID)
+    put(APOFPODPO::class, Res.string.Matcher_APOFPODPO to Res.string.Matcher_Description_APOFPODPO)
+    put(NSN::class, Res.string.Matcher_NSN to Res.string.Matcher_Description_NSN)
+    put(TCN::class, Res.string.Matcher_TCN to Res.string.Matcher_Description_TCN)
+    put(NPI::class, Res.string.Matcher_NPI to Res.string.Matcher_Description_NPI)
+    put(AddressUS::class, Res.string.Matcher_AddressUS to Res.string.Matcher_Description_AddressUS)
 
     // Extension detectors
     put(CertDetectFun::class, Res.string.Matcher_Cert to Res.string.Matcher_Description_Cert)
     put(CodeDetectFun::class, Res.string.Matcher_Code to Res.string.Matcher_Description_Code)
     put(RKNDomainDetectFun::class, Res.string.Matcher_DetectBlockedDomains to Res.string.Matcher_Description_DetectBlockedDomains)
+    put(GitleaksMatcher::class, Res.string.Matcher_Gitleaks to Res.string.Matcher_Description_Gitleaks)
     
     // User signatures
     put(UserSignature::class, Res.string.Matcher_UserSignature_Title to Res.string.Matcher_Description_UserSignature)
@@ -77,6 +98,21 @@ suspend fun IMatcher.readableName(): String {
     return matcherResources[this::class]?.first?.let { getString(it) }
         ?: this.name
 }
+
+suspend fun IMatcher.readableNameForLocale(localeTag: String): String {
+    val res = matcherResources[this::class]?.first ?: return this.name
+    return localeOverrideMutex.withLock {
+        val prev = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag(localeTag))
+            getString(res)
+        } finally {
+            Locale.setDefault(prev)
+        }
+    }
+}
+
+private val localeOverrideMutex = Mutex()
 
 @Composable
 fun IMatcher.composableName(): String {

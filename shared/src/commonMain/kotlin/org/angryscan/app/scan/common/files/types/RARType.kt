@@ -1,6 +1,7 @@
 package org.angryscan.app.scan.common.files.types
 
 import com.github.junrar.Archive
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -9,6 +10,8 @@ import org.angryscan.common.engine.IScanEngine
 import java.io.File
 import java.io.IOException
 import kotlin.coroutines.CoroutineContext
+
+private val logger = KotlinLogging.logger { }
 
 @Serializable
 object RARType: FileType() {
@@ -19,7 +22,8 @@ object RARType: FileType() {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val res = Document(file.length(), file.absolutePath)
         var skipped = 0
@@ -30,7 +34,7 @@ object RARType: FileType() {
                 while (true) {
                     val fileHeader = archive.nextFileHeader() ?: break
 
-                    if (!selectedExtension(fileHeader.fileName))
+                    if (!selectedExtension(fileHeader.fileName, selectedExtensions))
                         continue
 
                     val tmpFile = File.createTempFile(
@@ -40,12 +44,14 @@ object RARType: FileType() {
 
                     try {
                         archive.extractFile(fileHeader, tmpFile.outputStream())
-                        IFileType.getFileType(tmpFile)?.scanFile(tmpFile, context, engines, fastScan)?.also { doc ->
+                        IFileType.getFileType(tmpFile).forEach { ft ->
+                            ft.scanFile(tmpFile, context, engines, fastScan, selectedExtensions).also { doc ->
                             if (!doc.skipped()) {
                                 res + doc.getDocumentFields()
                             } else {
                                 skipped++
                             }
+                        }
                         }
                         all++
                     } catch (_: IOException) {
@@ -55,7 +61,8 @@ object RARType: FileType() {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Error while scanning rar ${file.absolutePath}: ${e.message}" }
             if (res.isEmpty()) {
                 res.skip()
                 return res

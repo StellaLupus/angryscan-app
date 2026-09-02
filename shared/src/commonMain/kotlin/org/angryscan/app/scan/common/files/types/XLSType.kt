@@ -1,5 +1,6 @@
 package org.angryscan.app.scan.common.files.types
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -12,7 +13,8 @@ import org.angryscan.app.scan.common.files.Location
 import org.angryscan.app.scan.common.files.LocationFinder.ScanException
 import org.angryscan.app.scan.common.files.extensions.isMaskable
 import org.angryscan.app.scan.common.files.extensions.mask
-import org.angryscan.common.engine.IMatcher
+import org.angryscan.app.scan.common.files.locations.XLSLocation
+import org.angryscan.app.ui.strings.readableName
 import org.angryscan.common.engine.IScanEngine
 import org.apache.poi.hssf.usermodel.HSSFWorkbook
 import org.apache.poi.ss.usermodel.CellType
@@ -22,6 +24,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import kotlin.coroutines.CoroutineContext
 
+private val logger = KotlinLogging.logger { }
+
 @Serializable
 object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
     override val name = "XLS"
@@ -30,7 +34,8 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val str = StringBuilder()
         val res = Document(file.length(), file.absolutePath)
@@ -47,11 +52,10 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
                                 row?.forEach { cell ->
                                     if (cell != null) {
                                         when (cell.cellType) {
-                                            CellType.NUMERIC -> str.append(dataFormatter.formatCellValue(cell))
-                                                .append("\n")
-
-                                            CellType.STRING -> str.append(dataFormatter.formatCellValue(cell))
-                                                .append("\n")
+                                            CellType.NUMERIC, CellType.STRING -> {
+                                                str.append(dataFormatter.formatCellValue(cell))
+                                                    .append("\n")
+                                            }
 
                                             else -> {}
                                         }
@@ -71,7 +75,8 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Filed to scan XLS file ${file.absolutePath}: ${e.message}" }
             res.skip()
             return res
         }
@@ -86,12 +91,11 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
     override suspend fun findLocation(
         filePath: String,
         engine: IScanEngine,
-        matcher: IMatcher,
         fastScan: Boolean
-    ): List<Location> {
+    ): List<XLSLocation> {
         var length = 0
         var sample = 0
-        val locations = mutableListOf<Location>()
+        val locations = mutableListOf<XLSLocation>()
         try {
             withContext(Dispatchers.IO) {
                 val file = File(filePath)
@@ -101,21 +105,58 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
                         dataFormatter.isEmulateCSV = true
                         workbook.forEach workbook@{ sheet ->
                             sheet?.forEach { row ->
+                                var before = ""
                                 row?.forEach { cell ->
                                     if (cell != null) {
                                         val text = when (cell.cellType) {
-                                            CellType.NUMERIC -> dataFormatter.formatCellValue(cell)
-
-                                            CellType.STRING -> dataFormatter.formatCellValue(cell)
-
+                                            CellType.NUMERIC, CellType.STRING -> dataFormatter.formatCellValue(cell)
                                             else -> ""
                                         }
 
+                                        var after = ""
+
                                         engine
                                             .scan(text)
-                                            .filter { it.matcher::class == matcher::class }
+                                            .also { r ->
+                                                if (r.isNotEmpty() && cell.address.column < row.count()) {
+                                                    var i = 1
+                                                    while (cell.address.column + i < row.count()) {
+                                                        val c = row.getCell(cell.address.column + i)
+                                                        if (c != null) {
+                                                            after = when (c.cellType) {
+                                                                CellType.NUMERIC, CellType.STRING -> dataFormatter.formatCellValue(
+                                                                    c
+                                                                )
+
+                                                                else -> ""
+                                                            }.let {
+                                                                it.substring(
+                                                                    startIndex = 0,
+                                                                    endIndex = (it.length - 1).coerceAtMost(
+                                                                        19
+                                                                    )
+                                                                )
+                                                            }
+                                                            break
+                                                        }
+                                                        i++
+                                                    }
+
+                                                }
+                                            }
                                             .forEach {
-                                                locations.add(Location(it, "${sheet.sheetName}:${cell.address}"))
+                                                locations.add(
+                                                    XLSLocation(
+                                                        entry = it.copy(
+                                                            after = after,
+                                                            before = before
+                                                        ),
+                                                        sheet = sheet.sheetName,
+                                                        col = cell.address.column,
+                                                        row = cell.address.row,
+                                                        cell = cell.address.formatAsString()
+                                                    )
+                                                )
                                             }
 
                                         if (isLengthOverload(length, isActive)) {
@@ -124,6 +165,10 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
                                             if (isSampleOverload(sample, fastScan, isActive))
                                                 return@withContext
                                         }
+                                        before = text
+                                            .substring(
+                                                (text.length - 20).coerceAtLeast(0)
+                                            )
                                     }
                                 }
                             }
@@ -131,7 +176,8 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Failed to find locations in XLS file ${filePath}: ${e.message}" }
             throw ScanException
         }
         return locations
@@ -145,39 +191,30 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
         var locationsMasked = 0
         val sortedLocations = locations
             .filter { it.isMaskable() }
-            .sortedBy { it.location.substringBefore(':') }
+            .map { it as XLSLocation }
+            .groupBy { it.sheet }
         withContext(Dispatchers.IO) {
             FileInputStream(inputFile).use { inputStream ->
                 HSSFWorkbook(inputStream).use { workbook ->
-                    sortedLocations.forEach { location ->
-                        val sheetName = location.location.substringBeforeLast(':')
+                    sortedLocations.keys.forEach { sheetName ->
                         val sheet = workbook.getSheet(sheetName)
-                        val cellAddress = location.location.substringAfterLast(':') // Example address: E3
-                        val row = sheet.getRow(cellAddress.replace("[A-Z]*".toRegex(), "").toInt() - 1)
-                        val cellNumber = cellAddress
-                            .replace("[0-9]*".toRegex(), "")
-                            .toColumnNumber()
-                        val cell = row.getCell(cellNumber)
-                        when(cell.cellType) {
-                            CellType.STRING -> {
-                                val value = cell.stringCellValue
-                                val replaced = value.replace(location.entry.value, location.mask())
-                                if(value != replaced) {
-                                    cell.setCellValue(replaced)
-                                    locationsMasked++
-                                }
-                            }
-                            CellType.NUMERIC -> {
-                                val value = cell.numericCellValue.toString()
-                                val replaced = value.replace(location.entry.value, location.mask())
-                                if(value != replaced) {
-                                    cell.setCellValue(replaced)
-                                    cell.cellType = CellType.STRING
-                                    locationsMasked++
-                                }
-                            }
-                            else -> {
 
+                        sortedLocations[sheetName]!!.forEach { location ->
+                            val row = sheet.getRow(location.row)
+                            val cell = row.getCell(location.col)
+                            val value = when (cell.cellType) {
+                                CellType.STRING -> cell.stringCellValue
+
+                                CellType.NUMERIC -> cell.numericCellValue.toString()
+
+                                else -> {
+                                    ""
+                                }
+                            }
+                            val replaced = value.replace(location.entry.value, location.mask())
+                            if (value != replaced) {
+                                cell.setCellValue(replaced)
+                                locationsMasked++
                             }
                         }
                     }
@@ -197,62 +234,60 @@ object XLSType : FileType(), IMaskFile, IFileLocation, IExportLocations {
     ): Int {
         var rowsExported = 0
         val sortedLocations = locations
-            .sortedBy { it.location.substringBefore(':') }
+            .map { it as XLSLocation }
+            .groupBy { it.sheet }
         withContext(Dispatchers.IO) {
             File(outputFile)
                 .bufferedWriter()
                 .use { writer ->
                     FileInputStream(inputFile).use { inputStream ->
                         HSSFWorkbook(inputStream).use { workbook ->
-                            sortedLocations.forEach { location ->
-                                val sheetName = location.location.substringBeforeLast(':')
+                            sortedLocations.keys.forEach { sheetName ->
                                 val sheet = workbook.getSheet(sheetName)
-                                val cellAddress = location.location.substringAfterLast(':') // Example address: E3
-                                val row = sheet.getRow(cellAddress.replace("[A-Z]*".toRegex(), "").toInt() - 1)
-                                val writeRow = row.joinToString(";") { cell ->
-                                    try {
-                                        when (cell.cellType) {
-                                            CellType.STRING -> {
-                                                cell.stringCellValue
-                                            }
 
-                                            CellType.NUMERIC -> {
-                                                cell.numericCellValue.toString()
-                                            }
+                                val rows = sortedLocations[sheetName]!!.groupBy { it.row }
+                                rows.keys.forEach { rowNum ->
+                                    val row = sheet.getRow(rowNum)
+                                    writer.write(rows[rowNum]!!.map { it.entry.matcher.readableName() }
+                                        .joinToString(", ") + ";")
+                                    val writeRow = row.joinToString(";") { cell ->
+                                        try {
+                                            when (cell.cellType) {
+                                                CellType.STRING -> {
+                                                    cell.stringCellValue
+                                                }
 
-                                            CellType.BOOLEAN -> {
-                                                cell.booleanCellValue.toString()
-                                            }
+                                                CellType.NUMERIC -> {
+                                                    cell.numericCellValue.toString()
+                                                }
 
-                                            CellType.FORMULA -> {
-                                                cell.cellFormula
-                                            }
+                                                CellType.BOOLEAN -> {
+                                                    cell.booleanCellValue.toString()
+                                                }
 
-                                            else -> {
-                                                cell.stringCellValue
+                                                CellType.FORMULA -> {
+                                                    cell.cellFormula
+                                                }
+
+                                                else -> {
+                                                    cell.stringCellValue
+                                                }
                                             }
+                                        } catch (e: Exception) {
+                                            logger.error { "Failed to export row ${rowNum} in sheet $sheetName: ${e.message}" }
+                                            ""
                                         }
-                                    } catch (_: Exception) {
-                                        ""
                                     }
-                                }
 
-                                writer.write(writeRow)
-                                writer.newLine()
-                                rowsExported++
+                                    writer.write(writeRow)
+                                    writer.newLine()
+                                    rowsExported++
+                                }
                             }
                         }
                     }
                 }
         }
         return rowsExported
-    }
-
-    private fun String.toColumnNumber(): Int {
-        var result = 0
-        for (ch in this) {
-            result = result * 26 + (ch.code - 'A'.code)
-        }
-        return result
     }
 }

@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kover)
 }
+
+configurations.configureEach {
+    exclude(group = "org.slf4j", module = "slf4j-simple")
+}
+
 kotlin {
     jvm("desktop")
     sourceSets {
@@ -15,7 +20,8 @@ kotlin {
                 implementation(compose.materialIconsExtended)
                 implementation(compose.material3)
 
-                implementation(libs.dorkbox)
+                implementation(libs.composenativetray)
+                implementation(libs.knotify)
 
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.serialization.json)
@@ -27,6 +33,11 @@ kotlin {
 
                 implementation(libs.sql.sqlite)
                 implementation(libs.sql.postgresql)
+                implementation(libs.sql.mysql)
+                implementation(libs.sql.clickhouse)
+                implementation(libs.sql.redshift)
+                implementation(libs.sql.mssql)
+                implementation(libs.sql.mongodb)
                 implementation(libs.sql.flyway)
 
                 api(libs.exposed.core)
@@ -37,6 +48,7 @@ kotlin {
                 implementation(libs.exposed.migration)
 
                 api(libs.angryscan.core)
+                api(libs.angryscan.gitleaks)
                 when (System.getenv("TARGET_OS")) { // Conveyor building
                     "windows" -> implementation(libs.hyperscan.windows)
                     "unix" -> implementation(libs.hyperscan.default)
@@ -47,7 +59,6 @@ kotlin {
                         }
                     }
                 }
-                println("Target OS: ${System.getenv("TARGET_OS")}")
 
                 implementation(libs.files.pdfbox)
                 implementation(libs.files.fastexcel)
@@ -61,6 +72,12 @@ kotlin {
 
                 implementation(libs.logging.oshai)
                 implementation(libs.logging.logback)
+
+                // Uber-jar: thin hive-jdbc omits RPC/Thrift. Woodstox on classpath fixes
+                // META-INF/services XMLOutputFactory entries that reference com.ctc.wstx.*.
+                // Declared after logging so slf4j-api/logback precede hive's embedded SLF4J 1.7 on the classpath.
+                implementation("com.fasterxml.woodstox:woodstox-core:6.6.2")
+                implementation("org.apache.hive:hive-jdbc:4.2.0:standalone@jar")
 
                 api(libs.koin.core)
                 api(libs.koin.compose)
@@ -90,8 +107,12 @@ kotlin {
                 implementation(compose.desktop.uiTestJUnit4)
                 implementation(libs.koin.test)
                 implementation(libs.koin.test.junit4)
+                implementation(libs.testcontainers.core)
+                implementation(libs.testcontainers.postgresql)
+                implementation(libs.testcontainers.mysql)
             }
         }
+        @Suppress("Unused")
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)

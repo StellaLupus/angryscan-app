@@ -5,10 +5,7 @@ import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import kotlinx.serialization.modules.subclass
 import kotlinx.serialization.serializer
-import org.angryscan.app.scan.common.connectors.ConnectorFileShare
-import org.angryscan.app.scan.common.connectors.ConnectorHTTP
-import org.angryscan.app.scan.common.connectors.ConnectorS3
-import org.angryscan.app.scan.common.connectors.IConnector
+import org.angryscan.app.scan.common.connectors.*
 import org.angryscan.app.scan.common.files.types.IFileType
 import org.angryscan.app.scan.functions.CertDetectFun
 import org.angryscan.app.scan.functions.CodeDetectFun
@@ -20,6 +17,7 @@ import org.angryscan.common.engine.custom.CustomEngine
 import org.angryscan.common.engine.hyperscan.HyperScanEngine
 import org.angryscan.common.engine.kotlin.KotlinEngine
 import org.angryscan.common.matchers.*
+import org.angryscan.gitleaks.matcher.GitleaksMatcher
 
 val PolymorphicSerializationModule = SerializersModule {
     polymorphic(IMatcher::class) {
@@ -30,6 +28,8 @@ val PolymorphicSerializationModule = SerializersModule {
         subclass(CadastralNumber::class)
         subclass(CardNumber::class)
         subclass(CVV::class)
+        subclass(CryptoWallet::class)
+        subclass(CryptoSeedPhrase::class)
         subclass(DeathDate::class)
         subclass(DriverLicense::class)
         subclass(EducationDoc::class)
@@ -72,10 +72,25 @@ val PolymorphicSerializationModule = SerializersModule {
         subclass(StateRegContract::class)
         subclass(VIN::class)
         subclass(VehicleRegNumber::class)
+        subclass(EIN::class)
+        subclass(ITIN::class)
+        subclass(RTN::class)
+        subclass(DriverLicenseUS::class)
+        subclass(VisaNumberUS::class)
+        subclass(AlienRegistrationNumber::class)
+        subclass(USCIS::class)
+        subclass(SEVISID::class)
+        subclass(DODID::class)
+        subclass(APOFPODPO::class)
+        subclass(NSN::class)
+        subclass(TCN::class)
+        subclass(NPI::class)
+        subclass(AddressUS::class)
         subclass(UserSignature::class)
         subclass(CertDetectFun::class)
         subclass(CodeDetectFun::class)
         subclass(RKNDomainDetectFun::class)
+        subclass(GitleaksMatcher::class)
 
         defaultDeserializer { _ -> serializer<UnknownDetectFun>() }
     }
@@ -83,6 +98,17 @@ val PolymorphicSerializationModule = SerializersModule {
         subclass(ConnectorS3::class)
         subclass(ConnectorFileShare::class)
         subclass(ConnectorHTTP::class)
+        subclass(ConnectorAIModels::class)
+        subclass(ConnectorPostgres::class)
+        subclass(ConnectorMySQL::class)
+        subclass(ConnectorSqlite::class)
+        subclass(ConnectorGreenPlum::class)
+        subclass(ConnectorHive::class)
+        subclass(ConnectorCockroachDB::class)
+        subclass(ConnectorClickHouse::class)
+        subclass(ConnectorRedshift::class)
+        subclass(ConnectorSqlServer::class)
+        subclass(ConnectorMongoDB::class)
     }
     polymorphic(IScanEngine::class) {
         subclass(KotlinEngine::class)

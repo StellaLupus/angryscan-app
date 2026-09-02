@@ -3,11 +3,12 @@ package org.angryscan.app.scan.common.connectors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import org.angryscan.app.scan.common.FilesCounter
+import org.angryscan.app.scan.common.ObjectCounter
+import org.angryscan.app.scan.common.files.types.IFileType
 import java.io.File
 
 @Serializable
-class ConnectorFileShare: IConnector {
+class ConnectorFileShare: IFileConnector {
     override suspend fun getFile(filePath: String): File =
         withContext(Dispatchers.IO) {
             return@withContext File(filePath)
@@ -15,15 +16,15 @@ class ConnectorFileShare: IConnector {
 
     override suspend fun scanDirectory(
         dir: String,
-        extensions: List<String>,
+        extensions: List<IFileType>,
         fileSelected: (FoundedFile) -> Unit
-    ): FilesCounter =
+    ): ObjectCounter =
         withContext(Dispatchers.IO) {
             val d = File(dir)
-            var filesCounter = FilesCounter()
+            var filesCounter = ObjectCounter()
 
             if (d.isDirectory) {
-                val items = d.listFiles() ?: return@withContext FilesCounter()
+                val items = d.listFiles() ?: return@withContext ObjectCounter()
                 for (item in items) {
                     if (item.isDirectory) {
                         try {
@@ -34,7 +35,8 @@ class ConnectorFileShare: IConnector {
                     } else {
                         filesCounter.add(item.length())
 
-                        if (extensions.any { item.extension == it }) {
+
+                        if (extensions.any { it.allowExtension(item.extension) }) {
                             val foundedFile = FoundedFile(
                                 path = item.absolutePath,
                                 size = item.length()
@@ -46,7 +48,7 @@ class ConnectorFileShare: IConnector {
             } else {
                 filesCounter.add(d.length())
 
-                if (extensions.any { d.extension == it }) {
+                if (extensions.any { it.allowExtension(d.extension) }) {
                     val foundedFile = FoundedFile(
                         path = d.absolutePath,
                         size = d.length()

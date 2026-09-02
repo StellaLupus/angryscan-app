@@ -6,10 +6,10 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import org.angryscan.app.scan.common.writer.ResultWriter
 import org.angryscan.app.serializers.MutableStateSerializer
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.io.File
 import java.util.*
 import kotlin.math.max
@@ -80,34 +80,44 @@ class AppSettings : KoinComponent {
 
 
     constructor() {
+        reload()
+    }
+
+    /**
+     * Reload settings from disk, keeping existing MutableState instances where possible.
+     */
+    fun reload() {
         try {
             val prop: AppSettings = Json.decodeFromString(settingsFile.readText())
 
-            this.threadCount = mutableStateOf(
-                if (prop.threadCount.value > Runtime.getRuntime().availableProcessors())
-                    max(
-                        Runtime.getRuntime().availableProcessors(),
-                        1
-                    )
-                else
-                    prop.threadCount.value
-            )
-
-            this.theme = prop.theme
-            this.language = prop.language
-            this.hideOnMinimize = prop.hideOnMinimize
-            this.reportSaveExtension = prop.reportSaveExtension
-            this.debugMode = prop.debugMode
-            this.firstMigration = prop.firstMigration
-            this.eulaAgreedVersion = prop.eulaAgreedVersion
-        } catch (_: Exception) {
-            logger.error {
-                "Failed to load app settings. Loading defaults."
+            val maxThreads = max(Runtime.getRuntime().availableProcessors(), 1)
+            val loadedThreadCount = if (prop.threadCount.value > Runtime.getRuntime().availableProcessors()) {
+                maxThreads
+            } else {
+                prop.threadCount.value
             }
+
+            this.threadCount.value = loadedThreadCount
+            this.theme.value = prop.theme.value
+            this.language.value = prop.language.value
+            this.hideOnMinimize.value = prop.hideOnMinimize.value
+            this.reportSaveExtension.value = prop.reportSaveExtension.value
+            this.debugMode.value = prop.debugMode.value
+            this.firstMigration.value = prop.firstMigration.value
+            this.eulaAgreedVersion.value = prop.eulaAgreedVersion.value
+        } catch (_: Exception) {
+            logger.error { "Failed to load app settings. Loading defaults." }
         }
     }
 
     fun save () {
         settingsFile.writeText(Json.encodeToString(this))
+    }
+
+    /** Effective UI/locale tag (`ru` / `en`) for Default / RU / EN. */
+    fun effectiveLocaleTag(): String = when (language.value) {
+        LanguageType.RU -> "ru"
+        LanguageType.EN -> "en"
+        LanguageType.Default -> LanguageType.Default.locale
     }
 }

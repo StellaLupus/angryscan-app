@@ -1,5 +1,6 @@
 package org.angryscan.app.scan.common.files.types
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -12,6 +13,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.cert.CertificateFactory
 import kotlin.coroutines.CoroutineContext
+
+private val logger = KotlinLogging.logger { }
 
 @Serializable
 enum class CertFileType: IFileType {
@@ -33,10 +36,11 @@ enum class CertFileType: IFileType {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document = when (this) {
-        ASCII -> scanASCII(file, context, engines, fastScan)
-        PKCS -> scanPKCS(file, context, engines, fastScan)
+        ASCII -> scanASCII(file, context, engines, fastScan, selectedExtensions)
+        PKCS -> scanPKCS(file, context, engines, fastScan, selectedExtensions)
         KEYSTORE -> scanKeyStore(file)
     }
 
@@ -44,13 +48,15 @@ enum class CertFileType: IFileType {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         return TextType.scanFile(
             file,
             context,
             engines,
-            fastScan
+            fastScan,
+            selectedExtensions
         )
     }
 
@@ -62,7 +68,8 @@ enum class CertFileType: IFileType {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val factory = CertificateFactory.getInstance("X.509")
         val res = Document(file.length(), file.absolutePath)
@@ -91,16 +98,19 @@ enum class CertFileType: IFileType {
                         file,
                         context,
                         engines,
-                        fastScan
+                        fastScan,
+                        selectedExtensions
                     ).getDocumentFields()
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Error while scanning pkcs ${file.absolutePath}: ${e.message}" }
             res + scanASCII(
                 file,
                 context,
                 engines,
-                fastScan
+                fastScan,
+                selectedExtensions
             ).getDocumentFields()
             return res
         }

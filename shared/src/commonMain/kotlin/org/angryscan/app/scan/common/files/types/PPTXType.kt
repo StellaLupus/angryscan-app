@@ -1,21 +1,23 @@
 package org.angryscan.app.scan.common.files.types
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import org.angryscan.common.engine.IMatcher
+import org.angryscan.app.scan.common.Document
+import org.angryscan.app.scan.common.files.IFileLocation
+import org.angryscan.app.scan.common.files.LocationFinder.ScanException
+import org.angryscan.app.scan.common.files.locations.BaseLocation
 import org.angryscan.common.engine.IScanEngine
 import org.apache.poi.xslf.usermodel.XMLSlideShow
 import org.apache.poi.xslf.usermodel.XSLFTable
 import org.apache.poi.xslf.usermodel.XSLFTextBox
-import org.angryscan.app.scan.common.Document
-import org.angryscan.app.scan.common.files.IFileLocation
-import org.angryscan.app.scan.common.files.Location
-import org.angryscan.app.scan.common.files.LocationFinder.ScanException
 import java.io.File
 import java.io.FileInputStream
 import kotlin.coroutines.CoroutineContext
+
+private val logger = KotlinLogging.logger {  }
 
 @Serializable
 object PPTXType : FileType(), IFileLocation {
@@ -25,7 +27,8 @@ object PPTXType : FileType(), IFileLocation {
         file: File,
         context: CoroutineContext,
         engines: List<IScanEngine>,
-        fastScan: Boolean
+        fastScan: Boolean,
+        selectedExtensions: List<IFileType>
     ): Document {
         val str = StringBuilder()
         val res = Document(file.length(), file.absolutePath)
@@ -93,7 +96,8 @@ object PPTXType : FileType(), IFileLocation {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Failed to scan PPTX file ${file.absolutePath}: ${e.message}" }
             res.skip()
             return res
         }
@@ -109,12 +113,11 @@ object PPTXType : FileType(), IFileLocation {
     override suspend fun findLocation(
         filePath: String,
         engine: IScanEngine,
-        matcher: IMatcher,
         fastScan: Boolean
-    ): List<Location> {
+    ): List<BaseLocation> {
         var length = 0
         var sample = 0
-        val locations = mutableListOf<Location>()
+        val locations = mutableListOf<BaseLocation>()
         try {
             withContext(Dispatchers.IO) {
                 val file = File(filePath)
@@ -124,10 +127,9 @@ object PPTXType : FileType(), IFileLocation {
                             if (slide.slideName != null) {
                                 engine
                                     .scan(slide.slideName)
-                                    .filter { it.matcher::class == matcher::class }
                                     .forEach {
                                         locations.add(
-                                            Location(
+                                            BaseLocation(
                                                 it,
                                                 "Slide: ${slideIndex + 1}"
                                             )
@@ -139,10 +141,9 @@ object PPTXType : FileType(), IFileLocation {
                             if (slide.title != null) {
                                 engine
                                     .scan(slide.title)
-                                    .filter { it.matcher::class == matcher::class }
                                     .forEach {
                                         locations.add(
-                                            Location(
+                                            BaseLocation(
                                                 it,
                                                 "Slide: ${slideIndex + 1}"
                                             )
@@ -157,10 +158,9 @@ object PPTXType : FileType(), IFileLocation {
                                     is XSLFTextBox -> {
                                         engine
                                             .scan(shape.text)
-                                            .filter { it.matcher::class == matcher::class }
                                             .forEach {
                                                 locations.add(
-                                                    Location(
+                                                    BaseLocation(
                                                         it,
                                                         "Slide: ${slideIndex + 1}"
                                                     )
@@ -180,10 +180,9 @@ object PPTXType : FileType(), IFileLocation {
                                             row.cells.forEach { cell ->
                                                 engine
                                                     .scan(cell.text)
-                                                    .filter { it.matcher::class == matcher::class }
                                                     .forEach {
                                                         locations.add(
-                                                            Location(
+                                                            BaseLocation(
                                                                 it,
                                                                 "Slide: ${slideIndex + 1}"
                                                             )
@@ -204,10 +203,9 @@ object PPTXType : FileType(), IFileLocation {
                             slide.comments.forEach { comment ->
                                 engine
                                     .scan(comment.text)
-                                    .filter { it.matcher::class == matcher::class }
                                     .forEach {
                                         locations.add(
-                                            Location(
+                                            BaseLocation(
                                                 it,
                                                 "Slide: ${slideIndex + 1}"
                                             )
@@ -223,7 +221,8 @@ object PPTXType : FileType(), IFileLocation {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.error { "Failed to find locations in PPTX file ${filePath}: ${e.message}" }
             throw ScanException
         }
         return locations

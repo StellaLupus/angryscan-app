@@ -21,15 +21,19 @@ import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.dialogs.compose.rememberFileSaverLauncher
 import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import org.angryscan.app.common.AppFiles
 import org.angryscan.app.common.ScanSettings
 import org.angryscan.app.resources.*
 import org.angryscan.app.scan.common.createDialogSettings
 import org.angryscan.app.scan.common.files.Location
 import org.angryscan.app.scan.common.files.LocationFinder
+import org.angryscan.app.scan.common.files.extensions.requireKeywords
 import org.angryscan.app.scan.common.files.types.IFileType
 import org.angryscan.app.scan.engine.fallback
 import org.angryscan.app.scan.engine.getEngine
+import org.angryscan.app.ui.extensions.fileDateFormat
 import org.angryscan.app.ui.strings.composableName
 import org.angryscan.app.ui.windows.components.DesktopWindowShapes
 import org.angryscan.app.ui.windows.components.TitleBar
@@ -40,7 +44,10 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import java.awt.Desktop
 import java.io.File
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
+@OptIn(ExperimentalTime::class)
 @Composable
 fun AttributeLocationWindow(
     filePath: String,
@@ -61,15 +68,21 @@ fun AttributeLocationWindow(
 
     val selectedLocations = remember { mutableStateListOf<Location>() }
 
-    val fileType = IFileType.getFileType(filePath)
-    val maskingSupported = fileType?.let { LocationFinder.isMaskSupported(it) && attribute is IMask } ?: false
-    val exportSupported = fileType?.let { LocationFinder.isExportSupported(it) } ?: false
+    val fileTypes = IFileType.getFileType(filePath)
+    val maskingSupported = fileTypes.any { ft ->
+        LocationFinder.isMaskSupported(ft) && attribute is IMask
+    }
+    val exportSupported = fileTypes.any { ft ->
+        LocationFinder.isExportSupported(ft)
+    }
+
+    val requireKeywords = fileTypes.requireKeywords(File(filePath).extension)
 
     coroutineScope.launch {
         searching = true
-        var engine = scanSettings.engine.value.getEngine(listOf(attribute))
+        var engine = scanSettings.engine.value.getEngine(listOf(attribute), requireKeywords)
         while (engine.matchers.isEmpty()) {
-            engine = engine.fallback().getEngine(listOf(attribute))
+            engine = engine.fallback().getEngine(listOf(attribute), requireKeywords)
 
             if (engine::class == scanSettings.engine) {
                 onClose(false)
@@ -83,8 +96,7 @@ fun AttributeLocationWindow(
             locations.addAll(
                 LocationFinder.findLocations(
                     filePath,
-                    engine,
-                    attribute
+                    engine
                 )
             )
             selectedLocations.addAll(
@@ -93,6 +105,7 @@ fun AttributeLocationWindow(
                         it.entry.matcher is IMask ||
                                 exportSupported
                     }
+                    .filter { it.isMaskable }
             )
             if (locations.isEmpty())
                 failedToFind = true
@@ -104,8 +117,8 @@ fun AttributeLocationWindow(
 
 
     val state = rememberDialogState(
-        width = 800.dp,
-        height = 500.dp
+        width = 1000.dp,
+        height = 600.dp
     )
 
     val scrollState = rememberLazyListState()
@@ -136,7 +149,6 @@ fun AttributeLocationWindow(
                 }
             }
         }
-
     }
 
     DialogWindow(
@@ -264,18 +276,19 @@ fun AttributeLocationWindow(
                                                     it.entry.matcher is IMask
                                                 } || exportSupported
                                             ) {
+                                                val selectableLocations = locations.filter { it.isMaskable }
                                                 Box(
                                                     modifier = Modifier
                                                         .clip(MaterialTheme.shapes.small)
                                                         .background(MaterialTheme.colorScheme.secondary)
                                                         .clickable {
                                                             if (
-                                                                selectedLocations.containsAll(locations)
+                                                                selectedLocations.containsAll(selectableLocations)
                                                             ) {
                                                                 selectedLocations.clear()
                                                             } else {
                                                                 selectedLocations.addAll(
-                                                                    locations
+                                                                    selectableLocations
                                                                         .filter { !selectedLocations.contains(it) }
                                                                 )
                                                             }
@@ -287,7 +300,7 @@ fun AttributeLocationWindow(
                                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
                                                         Icon(
-                                                            imageVector = if (selectedLocations.containsAll(locations))
+                                                            imageVector = if (selectedLocations.containsAll(selectableLocations))
                                                                 Icons.Outlined.CheckBox
                                                             else
                                                                 Icons.Outlined.CheckBoxOutlineBlank,
@@ -317,8 +330,9 @@ fun AttributeLocationWindow(
                                                         .clickable {
                                                             if (!working) {
                                                                 working = true
+                                                                val time = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
                                                                 saveLauncher.launch(
-                                                                    suggestedName = "${File(filePath).name}_Rows",
+                                                                    suggestedName = "${File(filePath).name}_Rows_${fileDateFormat.format(time)}",
                                                                     extension = "csv",
                                                                     directory = PlatformFile(AppFiles.UserDirPath)
                                                                 )
@@ -362,7 +376,7 @@ fun AttributeLocationWindow(
                                                                             filePath,
                                                                             selectedLocations
                                                                         )
-                                                                    if (maskedCount == selectedLocations.size) {
+                                                                    if (maskedCount > 0) {
                                                                         locations.removeAll(selectedLocations)
                                                                         selectedLocations.clear()
                                                                         coroutineScope.launch {
@@ -427,7 +441,9 @@ fun AttributeLocationWindow(
                                                         checked = selectedLocations.contains(location),
                                                         onCheckedChanged = { state ->
                                                             if (state) {
-                                                                selectedLocations.add(location)
+                                                                if (location.isMaskable) {
+                                                                    selectedLocations.add(location)
+                                                                }
                                                             } else {
                                                                 selectedLocations.remove(location)
                                                             }

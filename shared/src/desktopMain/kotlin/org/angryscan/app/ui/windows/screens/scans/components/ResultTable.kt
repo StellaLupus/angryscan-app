@@ -5,46 +5,68 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.CursorDropdownMenu
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDownward
-import androidx.compose.material.icons.outlined.ArrowUpward
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.dialogs.compose.rememberFileSaverLauncher
+import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.launch
-import org.angryscan.common.engine.IMatcher
-import org.jetbrains.compose.resources.getString
-import org.jetbrains.compose.resources.stringResource
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import org.angryscan.app.common.AppFiles
 import org.angryscan.app.common.OS
+import org.angryscan.app.common.ScanSettings
 import org.angryscan.app.resources.*
 import org.angryscan.app.scan.TaskEntityViewModel
 import org.angryscan.app.scan.TaskFileResult
 import org.angryscan.app.scan.TaskFilesViewModel
 import org.angryscan.app.scan.common.connectors.ConnectorFileShare
+import org.angryscan.app.scan.common.createDialogSettings
 import org.angryscan.app.scan.common.files.LocationFinder
+import org.angryscan.app.scan.common.files.extensions.requireKeywords
 import org.angryscan.app.scan.common.files.types.IFileType
+import org.angryscan.app.scan.engine.getEngine
+import org.angryscan.app.ui.extensions.fileDateFormat
+import org.angryscan.app.ui.windows.components.DescriptionTooltip
 import org.angryscan.app.ui.windows.components.MessageBox
+import org.angryscan.common.engine.IMatcher
+import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
 import java.io.File
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
+@OptIn(
+    ExperimentalLayoutApi::class,
+    ExperimentalComposeUiApi::class,
+    ExperimentalTime::class,
+    ExperimentalMaterialApi::class,
+    ExperimentalMaterial3Api::class
+)
 @Composable
 fun ResultTable(
     taskFilesViewModel: TaskFilesViewModel,
     task: TaskEntityViewModel,
-    selectedAttributes: List<IMatcher>
+    selectedAttributes: List<IMatcher>,
+    scanSettings: ScanSettings,
+    modifier: Modifier = Modifier
 ) {
 
     val coroutineScope = rememberCoroutineScope()
@@ -94,7 +116,7 @@ fun ResultTable(
             fileSelected?.path ?: "",
             attribute = attributeSelected!!,
             onClose = { allMasked ->
-                if(allMasked) {
+                if (allMasked) {
                     task.deleteFoundAttribute(fileSelected!!.id, attributeSelected!!)
                     coroutineScope.launch {
                         taskFilesViewModel.update()
@@ -136,15 +158,71 @@ fun ResultTable(
 
 
 
-    Scaffold(
-        modifier = Modifier
-            .clip(
-                MaterialTheme.shapes.medium.copy(
-                    bottomStart = CornerSize(0.dp),
-                    bottomEnd = CornerSize(0.dp)
+    var exportFile by remember { mutableStateOf<String?>(null) }
+    val exportMatchers = remember { mutableStateListOf<IMatcher>() }
+
+    val dialogSettings = createDialogSettings()
+
+    val saveLauncher = rememberFileSaverLauncher(
+        dialogSettings = dialogSettings
+    ) { file ->
+        coroutineScope.launch {
+            try {
+                if (file != null) {
+                    snackbarHostState.showSnackbar(
+                        getString(
+                            Res.string.LocationWindow_ExportRowsStarted
+                        )
+                    )
+                    val requireKeyword = IFileType
+                        .getFileType(file.file)
+                        .requireKeywords(file.file.extension)
+                    val engine = scanSettings.engine.value.getEngine(exportMatchers, requireKeyword)
+                    val rows = LocationFinder.exportRows(
+                        inputFile = exportFile!!,
+                        engine = engine,
+                        outputFile = file.path
+                    )
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            getString(
+                                Res.string.LocationWindow_ExportRowsCount,
+                                rows
+                            ),
+                            actionLabel = getString(Res.string.openFile)
+                        ).run {
+                            if(this == SnackbarResult.ActionPerformed) {
+                                Desktop.getDesktop().open(File(file.path))
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                snackbarHostState.showSnackbar(
+                    getString(
+                        Res.string.LocationWindow_ExportError
+                    )
                 )
-            )
-            .background(MaterialTheme.colorScheme.surface),
+            }
+        }
+    }
+
+
+
+    val colorScheme = MaterialTheme.colorScheme
+    val containerShape = RoundedCornerShape(16.dp)
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        modifier = modifier
+            .fillMaxSize()
+            .clip(containerShape)
+            .background(colorScheme.surfaceVariant.copy(alpha = 0.34f), containerShape)
+            .border(
+                width = 1.dp,
+                color = colorScheme.outlineVariant.copy(alpha = 0.62f),
+                shape = containerShape
+            ),
         floatingActionButton = {
             if (selectedFiles.isNotEmpty()) {
                 FloatingActionButton(
@@ -190,7 +268,10 @@ fun ResultTable(
                         modifier = Modifier
                             .padding(horizontal = 10.dp)
                     ) {
-                        Text(text = stringResource(Res.string.Result_DeleteFiles, selectedFiles.size))
+                        Text(
+                            text = stringResource(Res.string.Result_DeleteFiles, selectedFiles.size),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                         Icon(
                             imageVector = Icons.Outlined.Delete,
                             contentDescription = null
@@ -212,31 +293,34 @@ fun ResultTable(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier
-                        .padding(horizontal = 4.dp)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
-                    Checkbox(
-                        checked = selectedFiles.isNotEmpty() && selectedFiles.containsAll(sortedFiles.map { it.id }),
-                        onCheckedChange = { checkState ->
-                            if (checkState) {
-                                selectedFiles.addAll(
-                                    sortedFiles.map { it.id }
-                                        .filter { id -> !selectedFiles.contains(id) && id in filesExists }
-                                )
-                            } else {
-                                selectedFiles.clear()
-                            }
-                        },
-                        modifier = Modifier.size(40.dp),
-                        colors = CheckboxDefaults.colors().copy(
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                            uncheckedBorderColor = MaterialTheme.colorScheme.primary
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                        Checkbox(
+                            checked = selectedFiles.isNotEmpty() && selectedFiles.containsAll(sortedFiles.map { it.id }),
+                            onCheckedChange = { checkState ->
+                                if (checkState) {
+                                    selectedFiles.addAll(
+                                        sortedFiles.map { it.id }
+                                            .filter { id -> !selectedFiles.contains(id) && id in filesExists }
+                                    )
+                                } else {
+                                    selectedFiles.clear()
+                                }
+                            },
+                            modifier = Modifier.size(26.dp),
+                            colors = CheckboxDefaults.colors().copy(
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.primary
+                            )
                         )
-                    )
+                    }
                     Box(
                         modifier = Modifier
-                            .weight(0.5f)
+                            .weight(0.25f)
+                            .widthIn(max = 320.dp)
                             .clip(shape = MaterialTheme.shapes.small)
                             .clickable {
                                 if (sortColumn == SortColumn.Path) {
@@ -246,7 +330,7 @@ fun ResultTable(
                                     sortDescending = false
                                 }
                             }
-                            .padding(2.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Row(
@@ -254,22 +338,23 @@ fun ResultTable(
                         ) {
                             Text(
                                 text = stringResource(Res.string.Result_ColumnFile),
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (sortColumn == SortColumn.Path) {
                                 Icon(
                                     imageVector = if (sortDescending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
                                     contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(16.dp)
                                 )
                             }
                         }
                     }
                     Box(
                         modifier = Modifier
-                            .weight(0.5f)
+                            .weight(0.75f)
                             .clip(shape = MaterialTheme.shapes.small)
                             .clickable {
                                 if (sortColumn == SortColumn.Attribute) {
@@ -279,7 +364,7 @@ fun ResultTable(
                                     sortDescending = false
                                 }
                             }
-                            .padding(2.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Row(
@@ -287,22 +372,24 @@ fun ResultTable(
                         ) {
                             Text(
                                 text = stringResource(Res.string.Result_ColumnAttributes),
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (sortColumn == SortColumn.Attribute) {
                                 Icon(
                                     imageVector = if (sortDescending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
                                     contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(16.dp)
                                 )
                             }
                         }
                     }
                     Box(
                         modifier = Modifier
-                            .weight(0.1f)
+                            .weight(0.16f)
+                            .widthIn(min = 92.dp)
                             .clip(shape = MaterialTheme.shapes.small)
                             .clickable {
                                 if (sortColumn == SortColumn.Score) {
@@ -312,7 +399,7 @@ fun ResultTable(
                                     sortDescending = false
                                 }
                             }
-                            .padding(2.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
@@ -320,15 +407,18 @@ fun ResultTable(
                         ) {
                             Text(
                                 text = stringResource(Res.string.Result_ColumnScore),
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             if (sortColumn == SortColumn.Score) {
                                 Icon(
                                     imageVector = if (sortDescending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
                                     contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(16.dp)
                                 )
                             }
                         }
@@ -336,6 +426,7 @@ fun ResultTable(
                     Box(
                         modifier = Modifier
                             .weight(0.1f)
+                            .widthIn(min = 56.dp)
                             .clip(shape = MaterialTheme.shapes.small)
                             .clickable {
                                 if (sortColumn == SortColumn.Count) {
@@ -345,7 +436,7 @@ fun ResultTable(
                                     sortDescending = false
                                 }
                             }
-                            .padding(2.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
@@ -353,15 +444,16 @@ fun ResultTable(
                         ) {
                             Text(
                                 text = stringResource(Res.string.Result_ColumnCount),
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (sortColumn == SortColumn.Count) {
                                 Icon(
                                     imageVector = if (sortDescending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
                                     contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(16.dp)
                                 )
                             }
                         }
@@ -369,6 +461,7 @@ fun ResultTable(
                     Box(
                         modifier = Modifier
                             .weight(0.1f)
+                            .widthIn(min = 56.dp)
                             .clip(shape = MaterialTheme.shapes.small)
                             .clickable {
                                 if (sortColumn == SortColumn.Size) {
@@ -378,7 +471,7 @@ fun ResultTable(
                                     sortDescending = false
                                 }
                             }
-                            .padding(2.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
@@ -386,22 +479,24 @@ fun ResultTable(
                         ) {
                             Text(
                                 text = stringResource(Res.string.Result_ColumnSize),
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (sortColumn == SortColumn.Size) {
                                 Icon(
                                     imageVector = if (sortDescending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
                                     contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(16.dp)
                                 )
                             }
                         }
                     }
                 }
+                HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.48f))
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     state = scrollState
                 ) {
                     items(
@@ -410,17 +505,21 @@ fun ResultTable(
                         }
                     ) { file ->
                         val fileType = IFileType.getFileType(file.path)
-                        val locationSupported = fileType != null &&
-                                LocationFinder.isSupported(fileType) &&
+                        val locationSupported = fileType.any { LocationFinder.isSupported(it) } &&
                                 task.dbTask.connector is ConnectorFileShare
+                        val exportSupported = fileType.any { LocationFinder.isExportSupported(it) }
                         val exist = filesExists.contains(file.id)
                         var menuExpanded by remember { mutableStateOf(false) }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        val rowShape = RoundedCornerShape(12.dp)
+                        Box(
                             modifier = Modifier
-                                .clip(MaterialTheme.shapes.medium)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clip(rowShape)
+                                .background(colorScheme.surface.copy(alpha = 0.66f), rowShape)
+                                .border(
+                                    width = 1.dp,
+                                    color = colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                    shape = rowShape
+                                )
                                 .clickable(
                                     enabled = exist
                                 ) {
@@ -435,14 +534,39 @@ fun ResultTable(
                                         menuExpanded = true
                                     }
                                 }
-                                .padding(4.dp)
+                                .heightIn(min = 48.dp)
+                                .padding(8.dp)
                         ) {
-                            DropdownMenu(
+                            CursorDropdownMenu(
                                 expanded = menuExpanded,
                                 onDismissRequest = {
                                     menuExpanded = false
                                 },
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surface)
                             ) {
+                                DropdownMenuItem(
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Outlined.FileOpen,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    text = {
+                                        Text(
+                                            stringResource(Res.string.openFile),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    onClick = {
+                                        try {
+                                            Desktop.getDesktop().open(File(file.path))
+                                        } catch (_: Exception) {
+                                            filesExists.remove(file.id)
+                                        }
+                                        menuExpanded = false
+                                    }
+                                )
                                 DropdownMenuItem(
                                     leadingIcon = {
                                         Icon(
@@ -451,14 +575,17 @@ fun ResultTable(
                                         )
                                     },
                                     text = {
-                                        Text(stringResource(Res.string.deleteFile))
+                                        Text(
+                                            stringResource(Res.string.deleteFile),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
                                     },
                                     onClick = {
                                         if (File(file.path).delete()) {
                                             filesExists.remove(file.id)
                                             filesDeleted.add(file.id)
                                         }
-
+                                        menuExpanded = false
                                     }
                                 )
                                 if (OS.currentOS() == OS.WINDOWS) {
@@ -470,7 +597,10 @@ fun ResultTable(
                                             )
                                         },
                                         text = {
-                                            Text(stringResource(Res.string.DropDown_OpenInExplorer))
+                                            Text(
+                                                stringResource(Res.string.DropDown_OpenInExplorer),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
                                         },
                                         onClick = {
                                             val f = File(file.path)
@@ -480,83 +610,132 @@ fun ResultTable(
                                                 filesExists.remove(file.id)
                                                 filesDeleted.add(file.id)
                                             }
-
+                                            menuExpanded = false
+                                        }
+                                    )
+                                }
+                                if (exportSupported) {
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Outlined.SystemUpdateAlt,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        text = {
+                                            Text(
+                                                stringResource(Res.string.LocationWindow_ExportAllRows),
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        },
+                                        onClick = {
+                                            exportFile = file.path
+                                            exportMatchers.clear()
+                                            exportMatchers.addAll(file.foundAttributes.keys)
+                                            val time = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                            saveLauncher.launch(
+                                                suggestedName = "${File(file.path).name}_Rows_${fileDateFormat.format(time)}",
+                                                extension = "csv",
+                                                directory = PlatformFile(AppFiles.UserDirPath)
+                                            )
+                                            menuExpanded = false
                                         }
                                     )
                                 }
                             }
-                            Checkbox(
-                                checked = selectedFiles.contains(file.id),
-                                onCheckedChange = { checkState ->
-                                    if (checkState) {
-                                        selectedFiles.add(file.id)
-                                    } else {
-                                        selectedFiles.remove(file.id)
-                                    }
-                                },
-                                modifier = Modifier.size(40.dp),
-                                colors = CheckboxDefaults.colors().copy(
-                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
-                                    uncheckedBorderColor = MaterialTheme.colorScheme.primary
-                                ),
-                                enabled = exist
-                            )
-                            Text(
-                                text = file.path
-                                    .replace(task.path.value, "")
-                                    .removePrefix("/")
-                                    .removePrefix("\\")
-                                    .ifEmpty {
-                                        file.path
-                                            .substringAfterLast("/")
-                                            .substringAfterLast("\\")
-                                    },
-                                fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                                lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                                letterSpacing = 0.1.sp,
-                                fontWeight = MaterialTheme.typography.bodySmall.fontWeight,
-                                modifier = Modifier.weight(0.5f),
-                            )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .weight(0.5f)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                file.foundAttributes.toList().sortedByDescending { it.second }.forEach { attr ->
-                                    AttributeCard(
-                                        attribute = attr.first,
-                                        count = attr.second,
-                                        onClick = {
-                                            attributeSelected = attr.first
-                                            fileSelected = file
-                                            longScanMessageBoxVisible = true
+
+                                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                                    Checkbox(
+                                        checked = selectedFiles.contains(file.id),
+                                        onCheckedChange = { checkState ->
+                                            if (checkState) {
+                                                selectedFiles.add(file.id)
+                                            } else {
+                                                selectedFiles.remove(file.id)
+                                            }
                                         },
-                                        enabled = locationSupported && exist
+                                        modifier = Modifier.size(26.dp),
+                                        colors = CheckboxDefaults.colors().copy(
+                                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                            uncheckedBorderColor = MaterialTheme.colorScheme.primary
+                                        ),
+                                        enabled = exist
                                     )
                                 }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(0.25f)
+                                        .widthIn(max = 320.dp)
+                                ) {
+                                    DescriptionTooltip(
+                                        description = file.path,
+                                        delay = 400
+                                    ) {
+                                        Text(
+                                            text = file.path
+                                                .replace(task.path.value, "")
+                                                .removePrefix("/")
+                                                .removePrefix("\\")
+                                                .ifEmpty {
+                                                    file.path
+                                                        .substringAfterLast("/")
+                                                        .substringAfterLast("\\")
+                                                },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier
+                                        .weight(0.75f)
+                                ) {
+                                    file.foundAttributes.toList().sortedByDescending { it.second }.forEach { attr ->
+                                        AttributeChip(
+                                            attribute = attr.first,
+                                            count = attr.second,
+                                            onClick = {
+                                                attributeSelected = attr.first
+                                                fileSelected = file
+                                                longScanMessageBoxVisible = true
+                                            },
+                                            enabled = locationSupported && exist
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = file.score.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .weight(0.16f)
+                                        .widthIn(min = 92.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = file.count.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .weight(0.1f)
+                                        .widthIn(min = 56.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = file.size.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier
+                                        .weight(0.1f)
+                                        .widthIn(min = 56.dp),
+                                    textAlign = TextAlign.Center
+                                )
                             }
-                            Text(
-                                text = file.score.toString(),
-                                modifier = Modifier.weight(0.1f),
-                                fontSize = 14.sp,
-                                letterSpacing = 0.1.sp,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                text = file.count.toString(),
-                                modifier = Modifier.weight(0.1f),
-                                fontSize = 14.sp,
-                                letterSpacing = 0.1.sp,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                text = file.size.toString(),
-                                modifier = Modifier.weight(0.1f),
-                                fontSize = 14.sp,
-                                letterSpacing = 0.1.sp,
-                                textAlign = TextAlign.Center
-                            )
                         }
                     }
                 }
