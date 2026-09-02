@@ -203,6 +203,7 @@ class TaskEntityViewModel(
             delay(500)
         }
         if (_state.value != TaskState.PENDING && _state.value != TaskState.SEARCHING) {
+            var shouldComplete = false
             database.transaction {
                 if (_selectedFiles.value == 0L) {
                     _selectedFiles.value = TaskFiles
@@ -245,29 +246,32 @@ class TaskEntityViewModel(
 
                 if (_selectedFiles.value == _scannedFiles.value + _skippedFiles.value) {
                     if (_state.value != TaskState.COMPLETED) {
-                        setState(TaskState.COMPLETED)
-                        logger.info(
-                            throwable = null,
-                            LogMarkers.UserAction
-                        ) { "Scanning task completed. ID: ${_id.value}. Path: \"${_path.value}\"" }
+                        shouldComplete = true
                     }
                 }
             }
 
             _busy.value = false
+            if (shouldComplete) {
+                setState(TaskState.COMPLETED)
+                logger.info(
+                    throwable = null,
+                    LogMarkers.UserAction
+                ) { "Scanning task completed. ID: ${_id.value}. Path: \"${_path.value}\"" }
+            }
         }
     }
 
     @OptIn(ExperimentalTime::class)
-    fun setState(state: TaskState) {
+    suspend fun setState(state: TaskState) {
         logger.debug { "Task state changed to $state. ID: ${_id.value}. Path: \"${_path.value}\"" }
 
-        taskScope.launch {
-            val previousState = _state.value
-            while (_busy.value)
-                delay(1000)
+        val previousState = _state.value
+        while (_busy.value)
+            delay(100)
 
-            _busy.value = true
+        _busy.value = true
+        try {
             database.transaction {
                 dbTask.taskState = state
 
@@ -368,19 +372,24 @@ class TaskEntityViewModel(
                     delay(1000)
                 }
             }
-
+        } finally {
             _busy.value = false
         }
     }
 
     fun stop() {
-        if (_state.value != TaskState.COMPLETED)
-            setState(TaskState.STOPPED)
+        if (_state.value != TaskState.COMPLETED) {
+            taskScope.launch {
+                setState(TaskState.STOPPED)
+            }
+        }
     }
 
     fun resume(taskStarted: () -> Unit = {}) {
-        setState(TaskState.SCANNING)
-        taskStarted()
+        taskScope.launch {
+            setState(TaskState.SCANNING)
+            taskStarted()
+        }
     }
 
     fun rescan(taskStarted: () -> Unit = {}) {
@@ -394,7 +403,7 @@ class TaskEntityViewModel(
 
         taskScope.launch {
             while (_busy.value)
-                delay(1000)
+                delay(100)
 
             val extensions = database.transaction {
                 TaskFileExtensions
@@ -416,6 +425,8 @@ class TaskEntityViewModel(
                     }
                 }
             }
+
+            var discoveredFiles = _totalFiles.value
             if (_state.value == TaskState.PENDING || _state.value == TaskState.SEARCHING || rescan) {
                 if (_state.value != TaskState.SEARCHING)
                     setState(TaskState.SEARCHING)
@@ -452,13 +463,31 @@ class TaskEntityViewModel(
                     dbTask.size = directorySize.objectSize.toString()
                     dbTask.filesCount = directorySize.objectCount
                 }
-                _totalFiles.value = directorySize.objectCount
+                discoveredFiles = directorySize.objectCount
+                _totalFiles.value = discoveredFiles
                 _folderSize.value = directorySize.objectSize.toString()
             }
 
-            setState(TaskState.SCANNING)
-            taskStarted()
+            val nextState = stateAfterFileDiscovery(discoveredFiles)
+            setState(nextState)
+            if (nextState == TaskState.SCANNING) {
+                taskStarted()
+            } else if (nextState == TaskState.COMPLETED) {
+                logger.info(
+                    throwable = null,
+                    LogMarkers.UserAction
+                ) { "Scanning task completed. ID: ${_id.value}. Path: \"${_path.value}\"" }
+            }
         }
+    }
+
+    companion object {
+        /**
+         * When file discovery finds nothing to scan, skip SCANNING and complete immediately.
+         * Avoids console hang waiting for COMPLETED that never arrives via scan threads.
+         */
+        fun stateAfterFileDiscovery(discoveredFiles: Long): TaskState =
+            if (discoveredFiles == 0L) TaskState.COMPLETED else TaskState.SCANNING
     }
 
     private suspend fun scanObjects(
