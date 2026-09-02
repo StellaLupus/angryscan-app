@@ -30,6 +30,29 @@ sudo apt-get install -y --no-install-recommends \
   libx11-6 libxext6 libxrender1 libxtst6 libxi6 libxrandr2 libxinerama1 \
   libfreetype6 libfontconfig1 fontconfig fonts-dejavu-core
 
+# Docker is required by the Testcontainers-based database integration tests
+# (Postgres, MySQL, ClickHouse, CockroachDB, Greenplum, Hive). It runs nested inside
+# the unprivileged Cloud Agent container, so also install fuse-overlayfs (storage
+# driver that works without kernel overlay), iptables and uidmap. force-conf* keeps
+# the setup non-interactive across the fuse.conf conffile prompt.
+if ! command -v dockerd >/dev/null 2>&1; then
+  echo "Installing Docker and nested-container prerequisites..."
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+    docker.io fuse-overlayfs fuse3 iptables uidmap
+fi
+
+# Let the agent user talk to the Docker socket without sudo (group takes effect on the
+# next login; start.sh also relaxes the socket mode for the current session).
+sudo groupadd -f docker
+sudo usermod -aG docker "$(id -un)" || true
+
+# The Testcontainers Ryuk reaper is unreliable inside the nested container; disable it.
+# Containers are still cleaned up by the Testcontainers JVM shutdown hooks.
+if ! grep -qs '^ryuk.disabled=true' "${HOME}/.testcontainers.properties" 2>/dev/null; then
+  echo "ryuk.disabled=true" >> "${HOME}/.testcontainers.properties"
+fi
+
 # Warm the Gradle wrapper distribution and dependency cache, and compile main + test
 # sources so the first agent build is fast. Gradle launches with the base JDK and
 # resolves the Temurin toolchain automatically for compilation.

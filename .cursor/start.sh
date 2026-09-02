@@ -21,3 +21,26 @@ if ! xdpyinfo -display "${DISPLAY_NUM}" >/dev/null 2>&1; then
 fi
 
 echo "Virtual display ${DISPLAY_NUM} is ready."
+
+# Start the Docker daemon (needed for the Testcontainers database integration tests).
+# It runs nested in the unprivileged Cloud Agent container using the fuse-overlayfs
+# storage driver. Idempotent: skips startup when the daemon is already responsive.
+if command -v dockerd >/dev/null 2>&1; then
+  if ! sudo docker info >/dev/null 2>&1; then
+    echo "Starting Docker daemon..."
+    sudo bash -c 'nohup dockerd --storage-driver=fuse-overlayfs >/tmp/dockerd.log 2>&1 &'
+    for _ in $(seq 1 60); do
+      if sudo docker info >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+  # Relax the socket mode so the agent user can use Docker without sudo this session.
+  sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
+  if sudo docker info >/dev/null 2>&1; then
+    echo "Docker daemon is ready."
+  else
+    echo "WARNING: Docker daemon did not become ready; DB integration tests will be skipped." >&2
+  fi
+fi
