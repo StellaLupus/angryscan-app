@@ -3,9 +3,9 @@ package org.angryscan.app.ui
 import org.angryscan.app.ui.components.SelectionTypes
 import java.io.File
 import kotlin.io.path.createTempDirectory
-import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FileShareScanPathsTest {
@@ -15,7 +15,6 @@ class FileShareScanPathsTest {
         val dir = createTempDirectory(prefix = "csv-file-mode-").toFile()
         try {
             val csv = File(dir, "data.csv")
-            // Data rows look like paths / free text — must NOT be expanded in File mode.
             csv.writeText(
                 """
                 id,name,note
@@ -29,14 +28,18 @@ class FileShareScanPathsTest {
 
             assertEquals(SelectionTypes.File, resolved.selectionType)
             assertEquals(csv.absolutePath, resolved.scanPath)
-            assertEquals(null, resolved.listFilePath)
+            assertNull(resolved.listFilePath)
+            assertEquals(0, resolved.listedPathCount)
+            assertEquals(0, resolved.missingPathCount)
+            // Data rows must not become scan targets.
+            assertEquals(1, resolved.scanPath.split(";").size)
         } finally {
             dir.deleteRecursively()
         }
     }
 
     @Test
-    fun `FileWithPaths expands only existing paths from list file`() {
+    fun `FileWithPaths expands only existing paths and reports missing count`() {
         val dir = createTempDirectory(prefix = "csv-paths-mode-").toFile()
         try {
             val real1 = File(dir, "a.txt").apply { writeText("a") }
@@ -55,8 +58,32 @@ class FileShareScanPathsTest {
 
             assertEquals(SelectionTypes.FileWithPaths, resolved.selectionType)
             assertEquals(list.absolutePath, resolved.listFilePath)
+            assertEquals(3, resolved.listedPathCount)
+            assertEquals(1, resolved.missingPathCount)
             val paths = resolved.scanPath.split(";").filter { it.isNotEmpty() }
             assertEquals(listOf(real1.absolutePath, real2.absolutePath), paths)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `FileWithPaths with only missing paths yields empty scanPath`() {
+        val dir = createTempDirectory(prefix = "csv-all-missing-").toFile()
+        try {
+            val list = File(dir, "empty-targets.txt")
+            list.writeText(
+                """
+                ${dir.resolve("nope-1.bin").absolutePath}
+                ${dir.resolve("nope-2.bin").absolutePath}
+                """.trimIndent()
+            )
+
+            val resolved = FileShareScanPaths.resolve(list.absolutePath, SelectionTypes.FileWithPaths)
+
+            assertEquals("", resolved.scanPath)
+            assertEquals(2, resolved.listedPathCount)
+            assertEquals(2, resolved.missingPathCount)
         } finally {
             dir.deleteRecursively()
         }
@@ -86,18 +113,27 @@ class FileShareScanPathsTest {
     }
 
     @Test
-    fun `legacy auto FileWithPaths for any csv is wrong behavior`() {
-        // Documents the regression: treating every csv as a path list.
+    fun `typed csv path in File mode must not expand to data rows`() {
+        // Regression guard for the old detectSelectionType auto-FileWithPaths behavior.
         val dir = createTempDirectory(prefix = "csv-legacy-").toFile()
         try {
             val csv = File(dir, "customers.csv")
-            csv.writeText("name,city\nAda,London\nGrace,Berlin\n")
-            val legacyForced = csv.isFile && csv.extension.lowercase() in setOf("txt", "csv")
-            assertTrue(legacyForced)
+            val rows = listOf(
+                "name,city",
+                "Ada,London",
+                "Grace,Berlin",
+                "/tmp/ghost-path.pdf",
+            )
+            csv.writeText(rows.joinToString("\n"))
 
-            val resolvedAsFile = FileShareScanPaths.resolve(csv.absolutePath, SelectionTypes.File)
-            assertEquals(csv.absolutePath, resolvedAsFile.scanPath)
-            assertTrue(resolvedAsFile.scanPath.split(";").size == 1)
+            val asFile = FileShareScanPaths.resolve(csv.absolutePath, SelectionTypes.File)
+            val asPathList = FileShareScanPaths.resolve(csv.absolutePath, SelectionTypes.FileWithPaths)
+
+            assertEquals(csv.absolutePath, asFile.scanPath)
+            assertTrue(asPathList.listedPathCount >= rows.size)
+            // File mode must not produce the multi-target expansion of FileWithPaths.
+            assertTrue(asFile.scanPath != asPathList.scanPath || asPathList.scanPath.isEmpty())
+            assertEquals(1, asFile.scanPath.split(";").filter { it.isNotEmpty() }.size)
         } finally {
             dir.deleteRecursively()
         }

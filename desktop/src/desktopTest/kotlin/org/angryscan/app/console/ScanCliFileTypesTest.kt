@@ -30,6 +30,13 @@ class ScanCliFileTypesTest {
     }
 
     @Test
+    fun `resolveExtension is case insensitive`() {
+        assertEquals(PDFType, ScanCliFileTypes.resolveExtension("pdf"))
+        assertEquals(PDFType, ScanCliFileTypes.resolveExtension("Pdf"))
+        assertEquals(TextType, ScanCliFileTypes.resolveExtension("text"))
+    }
+
+    @Test
     fun `resolveExtension accepts names with underscores for spaces`() {
         val withSpaces = ScanCliFileTypes.selectableFileTypes()
             .firstOrNull { it.name.contains(' ') }
@@ -37,6 +44,7 @@ class ScanCliFileTypesTest {
 
         val arg = withSpaces.name.replace(' ', '_')
         assertEquals(withSpaces, ScanCliFileTypes.resolveExtension(arg))
+        assertEquals(withSpaces, ScanCliFileTypes.resolveExtension(arg.lowercase()))
     }
 
     @Test
