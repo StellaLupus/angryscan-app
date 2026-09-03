@@ -14,8 +14,10 @@ object ScanCliFileTypes {
             .getAll()
             .filterNot { it in (CertFileType.entries + CodeFileType.entries) }
 
-    fun resolveExtension(inputValue: String): IFileType =
-        selectableFileTypes()
-            .find { it.name.replace(" ", "_") == inputValue }
+    fun resolveExtension(inputValue: String): IFileType {
+        val normalized = inputValue.replace(" ", "_")
+        return selectableFileTypes()
+            .find { it.name.replace(" ", "_").equals(normalized, ignoreCase = true) }
             ?: throw IllegalArgumentException("Unknown extension: $inputValue")
+    }
 }

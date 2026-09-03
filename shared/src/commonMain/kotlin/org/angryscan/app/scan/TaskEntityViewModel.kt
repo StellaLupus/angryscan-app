@@ -5,6 +5,8 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
@@ -53,6 +55,9 @@ class TaskEntityViewModel(
     private val _busy = MutableStateFlow(false)
     val busy
         get() = _busy.asStateFlow()
+
+    /** Serializes state transitions; do not capture previous state outside this lock. */
+    private val stateMutex = Mutex()
 
     private var _id = MutableStateFlow<Int?>(null)
     val id = _id.asStateFlow()
@@ -251,7 +256,7 @@ class TaskEntityViewModel(
                 }
             }
 
-            _busy.value = false
+            // Do not clear _busy here — checkProgress does not own it. Clearing raced with setState.
             if (shouldComplete) {
                 setState(TaskState.COMPLETED)
                 logger.info(
@@ -264,116 +269,118 @@ class TaskEntityViewModel(
 
     @OptIn(ExperimentalTime::class)
     suspend fun setState(state: TaskState) {
-        logger.debug { "Task state changed to $state. ID: ${_id.value}. Path: \"${_path.value}\"" }
+        stateMutex.withLock {
+            val previousState = _state.value
+            // Idempotent: concurrent checkProgress callers must not double-notify COMPLETED.
+            if (previousState == state) return@withLock
 
-        val previousState = _state.value
-        while (_busy.value)
-            delay(100)
+            logger.debug { "Task state changed to $state. ID: ${_id.value}. Path: \"${_path.value}\"" }
 
-        _busy.value = true
-        try {
-            database.transaction {
-                dbTask.taskState = state
+            _busy.value = true
+            try {
+                database.transaction {
+                    dbTask.taskState = state
 
-                when (state) {
-                    TaskState.SEARCHING -> {
-                        dbTask.startedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                        _startedAt.value = dbTask.startedAt
+                    when (state) {
+                        TaskState.SEARCHING -> {
+                            dbTask.startedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                            _startedAt.value = dbTask.startedAt
 
-                        if (dbTask.pauseDate != null) {
-                            dbTask.delta = (dbTask.delta ?: 0L) +
-                                    (Clock.System.now() - dbTask.pauseDate!!.toInstant(TimeZone.currentSystemDefault()))
-                                        .toLong(DurationUnit.SECONDS)
-                            dbTask.pauseDate = null
+                            if (dbTask.pauseDate != null) {
+                                dbTask.delta = (dbTask.delta ?: 0L) +
+                                        (Clock.System.now() - dbTask.pauseDate!!.toInstant(TimeZone.currentSystemDefault()))
+                                            .toLong(DurationUnit.SECONDS)
+                                dbTask.pauseDate = null
 
-                            _pausedAt.value = null
-                            _deltaSeconds.value = dbTask.delta
-                        }
-                    }
-
-                    TaskState.COMPLETED -> {
-                        dbTask.finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                        _finishedAt.value = dbTask.finishedAt
-                    }
-
-                    TaskState.STOPPED -> {
-                        TaskFiles.update(
-                            where = {
-                                TaskFiles.task.eq(dbTask.id) and
-                                        TaskFiles.state.neq(TaskState.COMPLETED) and
-                                        TaskFiles.state.neq(TaskState.FAILED) and
-                                        TaskFiles.state.neq(TaskState.SCANNING)
+                                _pausedAt.value = null
+                                _deltaSeconds.value = dbTask.delta
                             }
-                        ) {
-                            it[TaskFiles.state] = TaskState.STOPPED
                         }
-                        if (dbTask.pauseDate == null)
-                            dbTask.pauseDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
 
-                        _pausedAt.value = dbTask.pauseDate
-                    }
+                        TaskState.COMPLETED -> {
+                            dbTask.finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                            _finishedAt.value = dbTask.finishedAt
+                        }
 
-                    TaskState.PENDING -> {
-                        if (dbTask.taskState > TaskState.PENDING) {
+                        TaskState.STOPPED -> {
+                            TaskFiles.update(
+                                where = {
+                                    TaskFiles.task.eq(dbTask.id) and
+                                            TaskFiles.state.neq(TaskState.COMPLETED) and
+                                            TaskFiles.state.neq(TaskState.FAILED) and
+                                            TaskFiles.state.neq(TaskState.SCANNING)
+                                }
+                            ) {
+                                it[TaskFiles.state] = TaskState.STOPPED
+                            }
                             if (dbTask.pauseDate == null)
                                 dbTask.pauseDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+
                             _pausedAt.value = dbTask.pauseDate
                         }
-                    }
 
-                    TaskState.SCANNING -> {
-                        TaskFiles.update(
-                            where = {
-                                TaskFiles.task.eq(dbTask.id) and
-                                        TaskFiles.state.neq(TaskState.COMPLETED) and
-                                        TaskFiles.state.neq(TaskState.FAILED)
+                        TaskState.PENDING -> {
+                            if (dbTask.taskState > TaskState.PENDING) {
+                                if (dbTask.pauseDate == null)
+                                    dbTask.pauseDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                _pausedAt.value = dbTask.pauseDate
                             }
-                        ) {
-                            it[TaskFiles.state] = TaskState.SEARCHING
                         }
 
-                        if (dbTask.pauseDate != null) {
-                            dbTask.delta = (dbTask.delta ?: 0L) +
-                                    (Clock.System.now() - dbTask.pauseDate!!.toInstant(TimeZone.currentSystemDefault()))
-                                        .toLong(DurationUnit.SECONDS)
-                            dbTask.pauseDate = null
-
-                            _pausedAt.value = null
-                            _deltaSeconds.value = dbTask.delta
-                        }
-                    }
-
-                    else -> {}
-                }
-            }
-
-            _state.value = state
-            if (previousState != TaskState.COMPLETED && state == TaskState.COMPLETED) {
-                tasksViewModel.notifyTaskCompleted(_id.value)
-            } else if (previousState == TaskState.COMPLETED && state != TaskState.COMPLETED) {
-                tasksViewModel.resetTaskCompletionNotification(_id.value)
-            }
-
-            if (state == TaskState.STOPPED) {
-                while (true) {
-                    val cnt = database.transaction {
-                        TaskFiles
-                            .selectAll()
-                            .where {
-                                TaskFiles.task.eq(dbTask.id) and
-                                        TaskFiles.state.neq(TaskState.STOPPED) and
-                                        TaskFiles.state.neq(TaskState.COMPLETED) and
-                                        TaskFiles.state.neq(TaskState.FAILED)
+                        TaskState.SCANNING -> {
+                            TaskFiles.update(
+                                where = {
+                                    TaskFiles.task.eq(dbTask.id) and
+                                            TaskFiles.state.neq(TaskState.COMPLETED) and
+                                            TaskFiles.state.neq(TaskState.FAILED)
+                                }
+                            ) {
+                                it[TaskFiles.state] = TaskState.SEARCHING
                             }
-                            .count()
+
+                            if (dbTask.pauseDate != null) {
+                                dbTask.delta = (dbTask.delta ?: 0L) +
+                                        (Clock.System.now() - dbTask.pauseDate!!.toInstant(TimeZone.currentSystemDefault()))
+                                            .toLong(DurationUnit.SECONDS)
+                                dbTask.pauseDate = null
+
+                                _pausedAt.value = null
+                                _deltaSeconds.value = dbTask.delta
+                            }
+                        }
+
+                        else -> {}
                     }
-                    if (cnt == 0L)
-                        break
-                    delay(1000)
                 }
+
+                _state.value = state
+                if (previousState != TaskState.COMPLETED && state == TaskState.COMPLETED) {
+                    tasksViewModel.notifyTaskCompleted(_id.value)
+                } else if (previousState == TaskState.COMPLETED && state != TaskState.COMPLETED) {
+                    tasksViewModel.resetTaskCompletionNotification(_id.value)
+                }
+
+                if (state == TaskState.STOPPED) {
+                    while (true) {
+                        val cnt = database.transaction {
+                            TaskFiles
+                                .selectAll()
+                                .where {
+                                    TaskFiles.task.eq(dbTask.id) and
+                                            TaskFiles.state.neq(TaskState.STOPPED) and
+                                            TaskFiles.state.neq(TaskState.COMPLETED) and
+                                            TaskFiles.state.neq(TaskState.FAILED)
+                                }
+                                .count()
+                        }
+                        if (cnt == 0L)
+                            break
+                        delay(1000)
+                    }
+                }
+            } finally {
+                _busy.value = false
             }
-        } finally {
-            _busy.value = false
         }
     }
 
@@ -487,7 +494,7 @@ class TaskEntityViewModel(
          * Avoids console hang waiting for COMPLETED that never arrives via scan threads.
          */
         fun stateAfterFileDiscovery(discoveredFiles: Long): TaskState =
-            if (discoveredFiles == 0L) TaskState.COMPLETED else TaskState.SCANNING
+            if (discoveredFiles <= 0L) TaskState.COMPLETED else TaskState.SCANNING
     }
 
     private suspend fun scanObjects(

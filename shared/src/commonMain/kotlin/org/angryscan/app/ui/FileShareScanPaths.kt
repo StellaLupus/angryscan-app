@@ -10,6 +10,9 @@ import java.io.File
  * Important: a single `.csv`/`.txt` file must NOT imply [SelectionTypes.FileWithPaths].
  * That mode is explicit (user picked "file with paths"). Otherwise a data CSV is
  * misread as thousands of fake paths and the task appears to scan forever.
+ *
+ * Manual entry of a path-list file also requires [SelectionTypes.FileWithPaths]
+ * (via the dedicated picker); File/Folder mode always scans the selected path itself.
  */
 object FileShareScanPaths {
 
@@ -18,6 +21,10 @@ object FileShareScanPaths {
         val selectionType: SelectionTypes,
         /** When mode is FileWithPaths, the list file path (for task name). */
         val listFilePath: String? = null,
+        /** Lines read from a path-list file (non-blank). Zero in File/Folder mode. */
+        val listedPathCount: Int = 0,
+        /** Listed paths that do not exist on disk. UI should surface this when > 0. */
+        val missingPathCount: Int = 0,
     )
 
     /**
@@ -52,17 +59,19 @@ object FileShareScanPaths {
         return when (selectionType) {
             SelectionTypes.FileWithPaths -> {
                 val listFile = File(normalized)
-                val existingPaths = listFile
+                val listedPaths = listFile
                     .takeIf { it.isFile }
                     ?.readLines()
                     .orEmpty()
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
-                    .filter { File(it).exists() }
+                val existingPaths = listedPaths.filter { File(it).exists() }
                 Resolved(
                     scanPath = existingPaths.joinToString(";"),
                     selectionType = SelectionTypes.FileWithPaths,
                     listFilePath = normalized,
+                    listedPathCount = listedPaths.size,
+                    missingPathCount = listedPaths.size - existingPaths.size,
                 )
             }
             SelectionTypes.Folder, SelectionTypes.File -> Resolved(

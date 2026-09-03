@@ -39,7 +39,10 @@ import org.angryscan.app.ui.windows.screens.main.components.*
 import org.angryscan.app.ui.windows.screens.main.rememberMainSourceRowTokens
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
+import io.github.oshai.kotlinlogging.KotlinLogging
 import java.io.File
+
+private val fileShareScanLogger = KotlinLogging.logger {}
 
 @Composable
 fun FileShareScreen(
@@ -438,6 +441,13 @@ fun FileShareScreen(
                         onRequireSourceInputs()
                         selectPathError = true
                         return@Button
+                    }
+                    if (resolved.missingPathCount > 0) {
+                        // Do not drop listed paths silently — surface via log; scan continues with existing ones.
+                        fileShareScanLogger.warn {
+                            "Path list skipped ${resolved.missingPathCount} of ${resolved.listedPathCount} " +
+                                "entries (not found on disk) from \"$normalizedPath\""
+                        }
                     }
                     path = normalizedPath
                     saveScreenState()
